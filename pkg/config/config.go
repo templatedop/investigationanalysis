@@ -9,13 +9,15 @@ import (
 
 // Config holds all configuration for the fraud investigation system
 type Config struct {
-	Server    ServerConfig    `json:"server"`
-	Temporal  TemporalConfig  `json:"temporal"`
-	Database  DatabaseConfig  `json:"database"`
-	LLM       LLMConfig       `json:"llm"`
-	Embedding EmbeddingConfig `json:"embedding"`
-	RAG       RAGConfig       `json:"rag"`
-	Agents    AgentsConfig    `json:"agents"`
+	Server       ServerConfig       `json:"server"`
+	Temporal     TemporalConfig     `json:"temporal"`
+	Database     DatabaseConfig     `json:"database"`
+	LLM          LLMConfig          `json:"llm"`
+	Embedding    EmbeddingConfig    `json:"embedding"`
+	RAG          RAGConfig          `json:"rag"`
+	Agents       AgentsConfig       `json:"agents"`
+	Graph        GraphConfig        `json:"graph"`
+	Observability ObservabilityConfig `json:"observability"`
 }
 
 // ServerConfig configures the HTTP server
@@ -35,12 +37,15 @@ type TemporalConfig struct {
 
 // DatabaseConfig configures database connection
 type DatabaseConfig struct {
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	User     string `json:"user"`
-	Password string `json:"password"`
-	Database string `json:"database"`
-	SSLMode  string `json:"ssl_mode"`
+	Host            string        `json:"host"`
+	Port            int           `json:"port"`
+	User            string        `json:"user"`
+	Password        string        `json:"password"`
+	Database        string        `json:"database"`
+	SSLMode         string        `json:"ssl_mode"`
+	MaxOpenConns    int           `json:"max_open_conns"`
+	MaxIdleConns    int           `json:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `json:"conn_max_lifetime"`
 }
 
 // LLMConfig configures LLM providers
@@ -105,6 +110,67 @@ type EscalationRules struct {
 	RequiredConfidence    float64 `json:"required_confidence"`
 }
 
+// GraphConfig configures the LangGraph-style execution
+type GraphConfig struct {
+	Enabled           bool          `json:"enabled"`
+	MaxIterations     int           `json:"max_iterations"`
+	EnableCheckpoints bool          `json:"enable_checkpoints"`
+	CheckpointTTL     time.Duration `json:"checkpoint_ttl"`
+	MaxRecursionDepth int           `json:"max_recursion_depth"`
+	DetectLoops       bool          `json:"detect_loops"`
+	LoopThreshold     int           `json:"loop_threshold"`
+	ParallelExecution bool          `json:"parallel_execution"`
+	StreamUpdates     bool          `json:"stream_updates"`
+}
+
+// ObservabilityConfig configures logging, metrics, and health checks
+type ObservabilityConfig struct {
+	Logging LoggingConfig `json:"logging"`
+	Metrics MetricsConfig `json:"metrics"`
+	Health  HealthConfig  `json:"health"`
+	Tracing TracingConfig `json:"tracing"`
+}
+
+// LoggingConfig configures structured logging
+type LoggingConfig struct {
+	Enabled     bool   `json:"enabled"`
+	Level       string `json:"level"` // debug, info, warn, error, fatal
+	Format      string `json:"format"` // json, text
+	Output      string `json:"output"` // stdout, stderr, file path
+	EnableColor bool   `json:"enable_color"`
+	AddCaller   bool   `json:"add_caller"`
+	AddTime     bool   `json:"add_time"`
+}
+
+// MetricsConfig configures Prometheus metrics
+type MetricsConfig struct {
+	Enabled            bool   `json:"enabled"`
+	Endpoint           string `json:"endpoint"`
+	Namespace          string `json:"namespace"`
+	Subsystem          string `json:"subsystem"`
+	EnableGoMetrics    bool   `json:"enable_go_metrics"`
+	EnableProcessMetrics bool `json:"enable_process_metrics"`
+}
+
+// HealthConfig configures health checks
+type HealthConfig struct {
+	Enabled          bool          `json:"enabled"`
+	LivenessPath     string        `json:"liveness_path"`
+	ReadinessPath    string        `json:"readiness_path"`
+	CheckTimeout     time.Duration `json:"check_timeout"`
+	CheckInterval    time.Duration `json:"check_interval"`
+	FailureThreshold int           `json:"failure_threshold"`
+}
+
+// TracingConfig configures distributed tracing
+type TracingConfig struct {
+	Enabled     bool    `json:"enabled"`
+	Provider    string  `json:"provider"` // jaeger, zipkin, otlp
+	Endpoint    string  `json:"endpoint"`
+	ServiceName string  `json:"service_name"`
+	SampleRate  float64 `json:"sample_rate"`
+}
+
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	return &Config{
@@ -120,12 +186,15 @@ func DefaultConfig() *Config {
 			TaskQueue: "fraud-investigation",
 		},
 		Database: DatabaseConfig{
-			Host:     "localhost",
-			Port:     5432,
-			User:     "postgres",
-			Password: "postgres",
-			Database: "fraud_investigation",
-			SSLMode:  "disable",
+			Host:            "localhost",
+			Port:            5432,
+			User:            "postgres",
+			Password:        "postgres",
+			Database:        "fraud_investigation",
+			SSLMode:         "disable",
+			MaxOpenConns:    25,
+			MaxIdleConns:    5,
+			ConnMaxLifetime: 5 * time.Minute,
 		},
 		LLM: LLMConfig{
 			Provider:     "ollama",
@@ -181,6 +250,51 @@ func DefaultConfig() *Config {
 			},
 			HumanReviewTimeout: 24 * time.Hour,
 		},
+		Graph: GraphConfig{
+			Enabled:           false, // Disabled by default, use traditional Temporal workflows
+			MaxIterations:     100,
+			EnableCheckpoints: true,
+			CheckpointTTL:     24 * time.Hour,
+			MaxRecursionDepth: 10,
+			DetectLoops:       true,
+			LoopThreshold:     3,
+			ParallelExecution: true,
+			StreamUpdates:     true,
+		},
+		Observability: ObservabilityConfig{
+			Logging: LoggingConfig{
+				Enabled:     true,
+				Level:       "info",
+				Format:      "json",
+				Output:      "stdout",
+				EnableColor: true,
+				AddCaller:   true,
+				AddTime:     true,
+			},
+			Metrics: MetricsConfig{
+				Enabled:              true,
+				Endpoint:             "/metrics",
+				Namespace:            "fraud_investigation",
+				Subsystem:            "",
+				EnableGoMetrics:      true,
+				EnableProcessMetrics: true,
+			},
+			Health: HealthConfig{
+				Enabled:          true,
+				LivenessPath:     "/health/live",
+				ReadinessPath:    "/health/ready",
+				CheckTimeout:     5 * time.Second,
+				CheckInterval:    10 * time.Second,
+				FailureThreshold: 3,
+			},
+			Tracing: TracingConfig{
+				Enabled:     false,
+				Provider:    "otlp",
+				Endpoint:    "localhost:4317",
+				ServiceName: "fraud-investigation",
+				SampleRate:  0.1,
+			},
+		},
 	}
 }
 
@@ -200,6 +314,15 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.overrideFromEnv()
 
 	return cfg, nil
+}
+
+// LoadConfigOrDefault loads config from file or returns default
+func LoadConfigOrDefault(path string) *Config {
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		return DefaultConfig()
+	}
+	return cfg
 }
 
 // SaveConfig saves configuration to file
@@ -255,6 +378,31 @@ func (c *Config) overrideFromEnv() {
 	if v := os.Getenv("EMBEDDING_MODEL"); v != "" {
 		c.Embedding.Model = v
 	}
+
+	// Graph configuration
+	if v := os.Getenv("GRAPH_ENABLED"); v != "" {
+		c.Graph.Enabled = parseBool(v, c.Graph.Enabled)
+	}
+
+	// Observability configuration
+	if v := os.Getenv("LOG_LEVEL"); v != "" {
+		c.Observability.Logging.Level = v
+	}
+	if v := os.Getenv("LOG_FORMAT"); v != "" {
+		c.Observability.Logging.Format = v
+	}
+	if v := os.Getenv("METRICS_ENABLED"); v != "" {
+		c.Observability.Metrics.Enabled = parseBool(v, c.Observability.Metrics.Enabled)
+	}
+	if v := os.Getenv("HEALTH_ENABLED"); v != "" {
+		c.Observability.Health.Enabled = parseBool(v, c.Observability.Health.Enabled)
+	}
+	if v := os.Getenv("TRACING_ENABLED"); v != "" {
+		c.Observability.Tracing.Enabled = parseBool(v, c.Observability.Tracing.Enabled)
+	}
+	if v := os.Getenv("TRACING_ENDPOINT"); v != "" {
+		c.Observability.Tracing.Endpoint = v
+	}
 }
 
 func parseInt(s string, defaultVal int) int {
@@ -263,6 +411,17 @@ func parseInt(s string, defaultVal int) int {
 		return defaultVal
 	}
 	return v
+}
+
+func parseBool(s string, defaultVal bool) bool {
+	switch s {
+	case "true", "1", "yes", "on", "enabled":
+		return true
+	case "false", "0", "no", "off", "disabled":
+		return false
+	default:
+		return defaultVal
+	}
 }
 
 var fmt = struct {
@@ -283,4 +442,54 @@ var fmt = struct {
 		}
 		return 1, nil
 	},
+}
+
+// IsGraphEnabled returns true if LangGraph mode is enabled
+func (c *Config) IsGraphEnabled() bool {
+	return c.Graph.Enabled
+}
+
+// GetLogLevel returns the configured log level
+func (c *Config) GetLogLevel() string {
+	return c.Observability.Logging.Level
+}
+
+// IsMetricsEnabled returns true if metrics are enabled
+func (c *Config) IsMetricsEnabled() bool {
+	return c.Observability.Metrics.Enabled
+}
+
+// IsHealthEnabled returns true if health checks are enabled
+func (c *Config) IsHealthEnabled() bool {
+	return c.Observability.Health.Enabled
+}
+
+// IsTracingEnabled returns true if tracing is enabled
+func (c *Config) IsTracingEnabled() bool {
+	return c.Observability.Tracing.Enabled
+}
+
+// Validate validates the configuration
+func (c *Config) Validate() error {
+	// Add validation logic here
+	if c.Server.Port < 1 || c.Server.Port > 65535 {
+		return &ValidationError{Field: "server.port", Message: "port must be between 1 and 65535"}
+	}
+	if c.Database.Host == "" {
+		return &ValidationError{Field: "database.host", Message: "database host is required"}
+	}
+	if c.LLM.BaseURL == "" {
+		return &ValidationError{Field: "llm.base_url", Message: "LLM base URL is required"}
+	}
+	return nil
+}
+
+// ValidationError represents a configuration validation error
+type ValidationError struct {
+	Field   string
+	Message string
+}
+
+func (e *ValidationError) Error() string {
+	return "config validation failed for " + e.Field + ": " + e.Message
 }

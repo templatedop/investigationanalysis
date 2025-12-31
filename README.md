@@ -45,9 +45,11 @@ A comprehensive multi-agent Retrieval-Augmented Generation (RAG) framework for f
 - **11 Specialized Agents**: Each agent handles a specific aspect of fraud investigation
 - **RAG with pgvector**: Vector similarity search for relevant knowledge retrieval
 - **Temporal Workflows**: Durable, reliable workflow orchestration
+- **LangGraph-Style Execution**: Optional graph-based agent orchestration (configurable)
 - **Multi-LLM Support**: Ollama, vLLM, OpenAI compatible providers
 - **Human-in-the-Loop**: Escalation and review workflows
 - **Comprehensive Audit Trail**: Full traceability of all decisions
+- **Observability**: Structured logging, Prometheus metrics, health checks
 
 ## Agents
 
@@ -87,6 +89,19 @@ docker exec -it investigationanalysis-ollama-1 ollama pull deepseek-r1:32b
 docker-compose ps
 ```
 
+### Start with Monitoring (Prometheus + Grafana)
+
+```bash
+# Start all services including monitoring
+docker-compose --profile monitoring up -d
+
+# Access services:
+# - API: http://localhost:8080
+# - Temporal UI: http://localhost:8088
+# - Prometheus: http://localhost:9090
+# - Grafana: http://localhost:3000 (admin/admin)
+```
+
 ### Manual Setup
 
 ```bash
@@ -103,9 +118,160 @@ go run cmd/worker/main.go
 go run cmd/api/main.go
 ```
 
-## Usage
+## Configuration
 
-### API Endpoints
+### Environment Variables
+
+```bash
+# Database
+export DB_HOST=localhost
+export DB_PORT=5432
+export DB_USER=postgres
+export DB_PASSWORD=postgres
+export DB_NAME=fraud_investigation
+
+# Temporal
+export TEMPORAL_HOST=localhost:7233
+export TEMPORAL_NAMESPACE=default
+
+# LLM
+export LLM_PROVIDER=ollama
+export LLM_BASE_URL=http://localhost:11434
+export LLM_MODEL=deepseek-r1:32b
+
+# Embeddings
+export EMBEDDING_PROVIDER=ollama
+export EMBEDDING_BASE_URL=http://localhost:11434
+export EMBEDDING_MODEL=nomic-embed-text
+
+# LangGraph Mode (enable graph-based execution)
+export GRAPH_ENABLED=false
+
+# Observability
+export LOG_LEVEL=info       # debug, info, warn, error, fatal
+export LOG_FORMAT=json      # json, text
+export METRICS_ENABLED=true
+export HEALTH_ENABLED=true
+export TRACING_ENABLED=false
+export TRACING_ENDPOINT=localhost:4317
+```
+
+### Configuration File (config.json)
+
+```json
+{
+  "server": {
+    "port": 8080,
+    "enable_cors": true
+  },
+  "graph": {
+    "enabled": false,
+    "max_iterations": 100,
+    "enable_checkpoints": true,
+    "detect_loops": true
+  },
+  "observability": {
+    "logging": {
+      "enabled": true,
+      "level": "info",
+      "format": "json"
+    },
+    "metrics": {
+      "enabled": true,
+      "endpoint": "/metrics",
+      "namespace": "fraud_investigation"
+    },
+    "health": {
+      "enabled": true,
+      "liveness_path": "/health/live",
+      "readiness_path": "/health/ready"
+    }
+  }
+}
+```
+
+## LangGraph-Style Execution
+
+The framework supports two execution modes:
+
+### 1. Temporal Workflow Mode (Default)
+
+Traditional Temporal-based workflow execution with:
+- Durable execution
+- Automatic retries
+- Activity heartbeats
+- Workflow versioning
+
+### 2. Graph Mode (Optional)
+
+LangGraph-style state graph execution with:
+- Conditional edge routing
+- Parallel node execution
+- Checkpoints for resumption
+- Human-in-the-loop interrupts
+- Streaming state updates
+
+**Enable Graph Mode:**
+
+```bash
+export GRAPH_ENABLED=true
+```
+
+Or in config.json:
+```json
+{
+  "graph": {
+    "enabled": true
+  }
+}
+```
+
+## Observability
+
+### Health Checks
+
+```bash
+# Liveness check (is the service alive?)
+curl http://localhost:8080/health/live
+
+# Readiness check (is the service ready for traffic?)
+curl http://localhost:8080/health/ready
+```
+
+### Metrics (Prometheus)
+
+Available metrics at `/metrics`:
+
+- `fraud_investigation_investigations_total` - Total investigations by status
+- `fraud_investigation_investigations_active` - Currently active investigations
+- `fraud_investigation_investigation_duration_seconds` - Investigation duration histogram
+- `fraud_investigation_risk_scores` - Distribution of risk scores
+- `fraud_investigation_decisions_total` - Total decisions by type
+- `fraud_investigation_escalations_total` - Escalations by reason
+- `fraud_investigation_agent_executions_total` - Agent executions by agent and status
+- `fraud_investigation_agent_duration_seconds` - Agent execution duration
+- `fraud_investigation_rag_queries_total` - RAG queries by store
+- `fraud_investigation_rag_latency_seconds` - RAG query latency
+
+### Logging
+
+Structured JSON logs with configurable levels:
+
+```json
+{
+  "level": "INFO",
+  "message": "Investigation completed",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "fields": {
+    "investigation_id": "inv-123",
+    "claim_id": "CLM001",
+    "decision": "APPROVED",
+    "risk_score": 0.25
+  }
+}
+```
+
+## API Endpoints
 
 ```bash
 # Start an investigation
@@ -136,49 +302,63 @@ curl -X POST http://localhost:8080/api/v1/decision \
 
 # List all investigations
 curl http://localhost:8080/api/v1/investigations
+
+# Health and metrics
+curl http://localhost:8080/health/live
+curl http://localhost:8080/health/ready
+curl http://localhost:8080/metrics
 ```
 
-### CLI Usage
+## Project Structure
 
-```bash
-# Start investigation
-./cli investigate --claim-id CLM001 --amount 50000 --type health
-
-# Check status
-./cli status --workflow-id investigation-CLM001
-
-# Send decision signal
-./cli signal --workflow-id investigation-CLM001 --decision approve
-
-# Search knowledge base
-./cli search --query "staged accident fraud patterns"
+```
+├── cmd/
+│   ├── api/              # REST API server
+│   ├── cli/              # Command-line interface
+│   └── worker/           # Temporal worker
+├── pkg/
+│   ├── agents/           # Specialized agent implementations
+│   ├── config/           # Configuration management
+│   ├── embeddings/       # Embedding generation
+│   ├── graph/            # LangGraph-style execution
+│   │   ├── state.go      # State management
+│   │   ├── node.go       # Node types
+│   │   ├── edge.go       # Edge routing
+│   │   ├── graph.go      # Graph builder
+│   │   └── executor.go   # Graph executor
+│   ├── llm/              # LLM client implementations
+│   ├── models/           # Domain models
+│   ├── observability/    # Observability components
+│   │   ├── logging/      # Structured logging
+│   │   ├── metrics/      # Prometheus metrics
+│   │   └── health/       # Health checks
+│   ├── rag/              # RAG system core
+│   ├── vectorstore/      # Vector database integration
+│   └── workflows/        # Temporal workflows
+├── tests/
+│   ├── unit/             # Unit tests
+│   └── integration/      # Integration tests
+├── migrations/           # Database migrations
+├── docker-compose.yml
+├── prometheus.yml        # Prometheus configuration
+├── Dockerfile
+└── README.md
 ```
 
-## Configuration
-
-Configuration can be set via environment variables or `config.json`:
+## Testing
 
 ```bash
-# Database
-export DB_HOST=localhost
-export DB_PORT=5432
-export DB_USER=postgres
-export DB_PASSWORD=postgres
-export DB_NAME=fraud_investigation
+# Run unit tests
+go test ./tests/unit/... -v
 
-# Temporal
-export TEMPORAL_HOST=localhost:7233
-export TEMPORAL_NAMESPACE=default
+# Run integration tests
+go test ./tests/integration/... -v
 
-# LLM
-export LLM_PROVIDER=ollama
-export LLM_BASE_URL=http://localhost:11434
-export LLM_MODEL=deepseek-r1:32b
+# Run all tests with coverage
+go test ./... -cover
 
-# Embeddings
-export EMBEDDING_PROVIDER=ollama
-export EMBEDDING_BASE_URL=http://localhost:11434
-export EMBEDDING_MODEL=nomic-embed-text
+# Skip long-running tests
+go test ./... -short
 ```
 
 ## RAG Knowledge Stores
@@ -190,50 +370,6 @@ The system uses five specialized vector stores:
 3. **Entity Knowledge**: Known fraudsters, watchlists, relationships
 4. **Playbooks**: Investigation procedures and guidelines
 5. **External Knowledge**: Industry trends, regulatory updates
-
-### Indexing Documents
-
-```go
-// Index a fraud case
-manager.IndexFraudCase(ctx, &FraudCaseDocument{
-    CaseID:        "FC001",
-    FraudType:     "staged_accident",
-    Description:   "Organized ring staging car accidents",
-    ModusOperandi: "Multiple claimants, same garage, inflated estimates",
-    Indicators:    []string{"multiple_claimants", "same_provider"},
-    Resolution:    "Claims denied, referred to law enforcement",
-})
-
-// Index a policy
-manager.IndexPolicy(ctx, &PolicyDocument{
-    PolicyName:  "Health Insurance Gold Plan",
-    PolicyType:  "health",
-    Coverage:    "Hospitalization, surgery, prescriptions",
-    Exclusions:  []string{"pre-existing conditions", "cosmetic procedures"},
-})
-```
-
-## Project Structure
-
-```
-├── cmd/
-│   ├── api/          # REST API server
-│   ├── cli/          # Command-line interface
-│   └── worker/       # Temporal worker
-├── pkg/
-│   ├── agents/       # Specialized agent implementations
-│   ├── config/       # Configuration management
-│   ├── embeddings/   # Embedding generation
-│   ├── llm/          # LLM client implementations
-│   ├── models/       # Domain models
-│   ├── rag/          # RAG system core
-│   ├── vectorstore/  # Vector database integration
-│   └── workflows/    # Temporal workflows
-├── migrations/       # Database migrations
-├── docker-compose.yml
-├── Dockerfile
-└── README.md
-```
 
 ## Workflow Phases
 
